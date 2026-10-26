@@ -1,8 +1,8 @@
-name: Weekly Newsletter
+name: Newsletter
 
 on:
   schedule:
-    - cron: "0 7 * * 1"   # every Monday 07:00 UTC
+    - cron: "0 7 * * *"   # every day 07:00 UTC (change to "0 7 * * 1" for Mondays only)
   workflow_dispatch:
     inputs:
       dry_run:
@@ -51,6 +51,10 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          # Daily cadence: look back 2 days (1 day + a safety day; sent articles are never repeated).
+          # Override via Settings > Secrets and variables > Actions > Variables.
+          LOOKBACK_DAYS: ${{ vars.LOOKBACK_DAYS || '2' }}
+          MAX_SELECTED_ARTICLES: ${{ vars.MAX_SELECTED_ARTICLES || '6' }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           NO_LLM: ${{ github.event_name == 'workflow_dispatch' && inputs.no_llm }}
         run: |
