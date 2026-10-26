@@ -2,7 +2,7 @@ import logging
 
 from src.collectors import FEEDS, RSSCollector
 from src.config import load_settings
-from src.filters import ArticleFilter, DeduplicationService
+from src.filters import ArticleFilter, ArticleRanker, DeduplicationService
 from src.services import ArticleNormalizer, StorageService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -26,18 +26,21 @@ def main() -> None:
     relevant = article_filter.filter_by_keywords(recent)
 
     with StorageService(settings.db_path) as storage:
-        candidates = DeduplicationService().deduplicate(relevant, storage.get_sent_ids())
-        storage.save_new(candidates)
+        unique = DeduplicationService().deduplicate(relevant, storage.get_sent_ids())
+        storage.save_new(unique)
         total_stored = storage.count()
+
+    # Only the best few reach Claude (Phase 8); everything else stays free.
+    candidates = ArticleRanker(settings.lookback_days).select_top(unique, settings.max_articles_to_claude)
 
     log.info(
         "Funnel: discovered=%d normalized=%d recent=%d keyword_match=%d unique_unsent=%d "
-        "(failed feeds: %d, rows in DB: %d)",
-        discovered, len(articles), len(recent), len(relevant), len(candidates),
+        "top_candidates=%d (failed feeds: %d, rows in DB: %d)",
+        discovered, len(articles), len(recent), len(relevant), len(unique), len(candidates),
         len(collector.failed_feeds), total_stored,
     )
-    for a in candidates[:8]:
-        log.info("  [%s] %s  <- %s", a.source, a.title, ", ".join(a.matched_keywords[:4]))
+    for a in candidates:
+        log.info("  %.2f [%s] %s", a.relevance_score, a.source, a.title)
 
 
 if __name__ == "__main__":
