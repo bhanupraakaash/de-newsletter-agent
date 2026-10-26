@@ -164,3 +164,6 @@ docker run --rm --env-file .env -v "$PWD/data:/app/data" -v "$PWD/output:/app/ou
 ## License
 
 MIT
+
+<img width="1591" height="764" alt="{F0522DD2-4D79-4932-ADB0-281E4A641EEE}" src="https://github.com/user-attachments/assets/10553c08-af5b-4708-be7a-03b574ae70ec" />
+
