@@ -2,8 +2,8 @@ import logging
 
 from src.collectors import FEEDS, RSSCollector
 from src.config import load_settings
-from src.filters import ArticleFilter
-from src.services import ArticleNormalizer
+from src.filters import ArticleFilter, DeduplicationService
+from src.services import ArticleNormalizer, StorageService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # silence per-request noise
@@ -25,11 +25,18 @@ def main() -> None:
     recent = article_filter.filter_by_date(articles)
     relevant = article_filter.filter_by_keywords(recent)
 
+    with StorageService(settings.db_path) as storage:
+        candidates = DeduplicationService().deduplicate(relevant, storage.get_sent_ids())
+        storage.save_new(candidates)
+        total_stored = storage.count()
+
     log.info(
-        "Funnel: discovered=%d normalized=%d recent=%d keyword_match=%d (failed feeds: %d)",
-        discovered, len(articles), len(recent), len(relevant), len(collector.failed_feeds),
+        "Funnel: discovered=%d normalized=%d recent=%d keyword_match=%d unique_unsent=%d "
+        "(failed feeds: %d, rows in DB: %d)",
+        discovered, len(articles), len(recent), len(relevant), len(candidates),
+        len(collector.failed_feeds), total_stored,
     )
-    for a in relevant[:8]:
+    for a in candidates[:8]:
         log.info("  [%s] %s  <- %s", a.source, a.title, ", ".join(a.matched_keywords[:4]))
 
 
