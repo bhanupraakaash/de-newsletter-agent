@@ -1,47 +1,52 @@
+"""Entry point: python -m src.main [--dry-run] [--no-llm]"""
+import argparse
 import logging
+import sys
 
+from src.agents import NewsletterAgent
 from src.collectors import FEEDS, RSSCollector
 from src.config import load_settings
-from src.filters import ArticleFilter, ArticleRanker, DeduplicationService
-from src.services import ArticleNormalizer, StorageService
+from src.logging_setup import configure_logging
+from src.services import ClaudeService, CostTracker, EmailService, StorageService
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logging.getLogger("httpx").setLevel(logging.WARNING)  # silence per-request noise
 log = logging.getLogger("datapulse")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="DataPulse AI weekly newsletter agent")
+    parser.add_argument("--dry-run", action="store_true", help="build the newsletter but do not email it")
+    parser.add_argument("--no-llm", action="store_true", help="skip Claude entirely (free; Python ranking only)")
+    args = parser.parse_args(argv)
+
+    configure_logging()
     settings = load_settings()
-    log.info("DataPulse AI starting (model=%s, lookback=%dd)", settings.claude_model, settings.lookback_days)
-    log.info("API key configured: %s", bool(settings.anthropic_api_key))  # never log the key itself
 
-    collector = RSSCollector(FEEDS)
-    raw_articles = collector.collect()
-    discovered = len(raw_articles)
+    if not args.dry_run:
+        missing = settings.missing_email_settings()
+        if missing:
+            log.error("Cannot send email; missing settings: %s (use --dry-run to skip sending)", ", ".join(missing))
+            return 2
 
-    articles = ArticleNormalizer(settings.max_article_chars).normalize_all(raw_articles)
+    tracker = CostTracker()
+    llm = None
+    if args.no_llm:
+        log.info("--no-llm: Claude disabled")
+    elif not settings.anthropic_api_key:
+        log.warning("ANTHROPIC_API_KEY not set: running without Claude")
+    else:
+        llm = ClaudeService(
+            settings.anthropic_api_key, settings.claude_model, settings.max_output_tokens, cost_tracker=tracker
+        )
 
-    article_filter = ArticleFilter(lookback_days=settings.lookback_days)
-    recent = article_filter.filter_by_date(articles)
-    relevant = article_filter.filter_by_keywords(recent)
+    email = None if args.dry_run else EmailService.from_settings(settings)
+    log.info("DataPulse AI starting (model=%s, dry_run=%s, claude=%s)", settings.claude_model, args.dry_run, llm is not None)
 
     with StorageService(settings.db_path) as storage:
-        unique = DeduplicationService().deduplicate(relevant, storage.get_sent_ids())
-        storage.save_new(unique)
-        total_stored = storage.count()
+        agent = NewsletterAgent(settings, RSSCollector(FEEDS), storage, llm=llm, cost_tracker=tracker, email=email)
+        stats = agent.run(dry_run=args.dry_run)
 
-    # Only the best few reach Claude (Phase 8); everything else stays free.
-    candidates = ArticleRanker(settings.lookback_days).select_top(unique, settings.max_articles_to_claude)
-
-    log.info(
-        "Funnel: discovered=%d normalized=%d recent=%d keyword_match=%d unique_unsent=%d "
-        "top_candidates=%d (failed feeds: %d, rows in DB: %d)",
-        discovered, len(articles), len(recent), len(relevant), len(unique), len(candidates),
-        len(collector.failed_feeds), total_stored,
-    )
-    for a in candidates:
-        log.info("  %.2f [%s] %s", a.relevance_score, a.source, a.title)
+    return 0 if stats.status in ("success", "no_content") else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

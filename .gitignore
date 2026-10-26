@@ -16,3 +16,7 @@ data/*.sqlite
 .vscode/
 .idea/
 .DS_Store
+
+# Generated output
+output/
+logs/

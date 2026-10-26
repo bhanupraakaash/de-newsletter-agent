@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.models import Article
+from src.models import Article, RunStats
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,23 @@ CREATE TABLE IF NOT EXISTS articles (
     sent_at          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_articles_sent ON articles(sent);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at        TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    dry_run           INTEGER NOT NULL,
+    llm_used          INTEGER NOT NULL,
+    discovered        INTEGER NOT NULL,
+    after_filtering   INTEGER NOT NULL,
+    sent_to_claude    INTEGER NOT NULL,
+    selected          INTEGER NOT NULL,
+    failed_feeds      INTEGER NOT NULL,
+    input_tokens      INTEGER NOT NULL,
+    output_tokens     INTEGER NOT NULL,
+    cost_usd          REAL NOT NULL,
+    duration_seconds  REAL NOT NULL
+);
 """
 
 
@@ -95,7 +112,28 @@ class StorageService:
                 ),
             )
 
+    def save_run(self, stats: RunStats) -> None:
+        with self.conn:
+            self.conn.execute(
+                """INSERT INTO runs (started_at, status, dry_run, llm_used, discovered, after_filtering,
+                   sent_to_claude, selected, failed_feeds, input_tokens, output_tokens, cost_usd, duration_seconds)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    stats.started_at.isoformat(), stats.status, int(stats.dry_run), int(stats.llm_used),
+                    stats.articles_discovered, stats.articles_after_filtering, stats.articles_sent_to_claude,
+                    stats.articles_selected, stats.failed_feeds, stats.input_tokens, stats.output_tokens,
+                    stats.estimated_cost_usd, stats.duration_seconds,
+                ),
+            )
+
     # --- reads ------------------------------------------------------------
+
+    def total_cost(self) -> float:
+        """Estimated API spend recorded across all runs so far (USD)."""
+        return self.conn.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM runs").fetchone()[0]
+
+    def run_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
 
     def get_sent_ids(self) -> set[str]:
         rows = self.conn.execute("SELECT id FROM articles WHERE sent = 1").fetchall()

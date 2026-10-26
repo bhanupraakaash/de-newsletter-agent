@@ -18,4 +18,6 @@ class LLMResponse(BaseModel):
 
 
 class LLMProvider(Protocol):
-    def generate(self, system: str, user: str, max_tokens: int | None = None) -> LLMResponse: ...
+    def generate(
+        self, system: str, user: str, max_tokens: int | None = None, purpose: str = ""
+    ) -> LLMResponse: ...
