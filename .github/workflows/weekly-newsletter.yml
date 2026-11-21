@@ -1,8 +1,8 @@
 name: Newsletter
 
 on:
-  schedule:
-    - cron: "0 7 * * *"   # every day 07:00 UTC (change to "0 7 * * 1" for Mondays only)
+  # Schedule removed: runs only when started manually from the Actions tab.
+  # To re-enable daily runs, add:  schedule: [{cron: "0 7 * * *"}]
   workflow_dispatch:
     inputs:
       dry_run:
